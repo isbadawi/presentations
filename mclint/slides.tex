@@ -1,0 +1,286 @@
+\documentclass{beamer}
+\usetheme{Boadilla}
+\usepackage{listings}
+\title{McLint: Static Code Analyzer for MATLAB}
+\author{Ismail Badawi}
+\date{April 12, 2012}
+
+\begin{document}
+
+\AtBeginSection[]
+{
+    \begin{frame}{Table of Contents}
+        \tableofcontents[currentsection]
+    \end{frame}
+}
+ 
+\lstset{
+    basicstyle=\ttfamily\tiny,
+    escapechar=|,
+    language=Java,
+    showstringspaces=false,
+    keywordstyle=\color{purple} 
+}                 
+ 
+\begin{frame}
+\maketitle
+\end{frame}
+
+\begin{frame}{Outline}
+\tableofcontents
+\end{frame}
+
+\section{Motivation}
+\begin{frame}{Thoughts}
+\begin{itemize}
+    \item Compiler errors are often very helpful.
+        \begin{itemize}
+        \item They tell you \emph{what} and \emph{where} the problem is.
+        \end{itemize}
+    \item Compiler warnings are also quite useful if you enable them.
+    \item But compilers don't warn about everything!
+    \item And sometimes we don't have a compiler...
+\end{itemize}
+\end{frame}
+
+\begin{frame}{The idea}
+Let's write a tool that takes source code and generates compiler warnings.
+\begin{itemize}
+    \item This variable isn't being used!
+    \item This code isn't reachable!
+    \item This shouldn't be inside the loop!
+\end{itemize}
+\end{frame}
+
+\begin{frame}{Static analysis tools}
+Tools like this exist for many languages.
+\begin{itemize}
+\item C has the original {\tt lint} (and many others)
+\item Java has {\tt FindBugs} (and many others)
+\item JavaScript has {\tt jslint}
+\item Python has {\tt pychecker}, {\tt pylint}
+\item Even MATLAB has a builtin function {\tt checkcode} for this
+\end{itemize}
+\end{frame}
+
+\begin{frame}{Static analysis for MATLAB}
+Why is this useful for MATLAB?
+\begin{itemize}
+\item MATLAB is a confusing language.
+\item MATLAB is aimed at people who are not experienced programmers.
+    \begin{itemize}
+        \item Scientists, engineers, students
+    \end{itemize}
+\end{itemize}
+\end{frame}
+
+\begin{frame}{MATLAB difficulties}
+Why is this harder in MATLAB?
+\begin{itemize}
+\item MATLAB is a very dynamic language.
+    \begin{itemize}
+    \item Very weak typing
+    \item Features like {\tt eval}, {\tt assignin}, {\tt clear}...
+    \item Even something like name resolution is complicated.
+    \end{itemize}
+\end{itemize}
+\end{frame}
+
+\begin{frame}{MATLAB builtins}
+Why is the builtin MATLAB functionality not enough?
+\begin{itemize}
+\item It's closed, so we can't see how it works
+\item We also can't extend it to write analyses of our own
+\end{itemize}
+We have a MATLAB frontend (McLab) and an analysis framework (McSAF), so why
+not do this ourselves?
+\end{frame}
+
+\section{McLint}
+\begin{frame}{Goals}
+\begin{itemize}
+\item Develop an \emph{extensible} framework for analyzing code and
+generating messages or warnings about it.
+    \begin{itemize}
+    \item It should allow for analysis \emph{plugins} to be loaded at runtime.
+    \end{itemize}
+\item Provide a few important builtin analyses.
+\item The end result is a tool that could be useful to MATLAB programmers.
+\end{itemize}
+\end{frame}
+
+\begin{frame}{Overview}
+
+{\tt mclint file1.m ...}
+\begin{enumerate}
+\item Parse and generate ASTs for the given code
+\item Precompute a few fundamental analyses
+    \begin{itemize}
+    \item Kind analysis, reaching definitions, live variables
+    \end{itemize}
+\item Load classes implementing {\tt LintAnalysis} in search path
+\item Run analyses one by one, gathering their messages
+\item Generate a report of all messages
+\end{enumerate}
+\end{frame}
+
+\begin{frame}[fragile]{{\tt LintAnalysis}}
+\begin{itemize}
+\item Every analysis class implements this interface:
+\begin{lstlisting}[basicstyle=\ttfamily, lang=java]
+public interface LintAnalysis {
+    void analyze(Lint lint);
+}
+\end{lstlisting}
+\item In addition to this, it must also expose a constructor taking an
+{\tt AnalysisKit}, which is just a class wrapping the AST together with
+some precomputed analyses.
+\item {\tt Lint} maintains the collection of messages generated. Analyses
+call its {\tt report(Message)} method to report messages.
+\end{itemize}
+\end{frame}
+
+\begin{frame}[fragile]{A sample analysis}
+\begin{lstlisting}
+public class Shadowing extends DefinitionVisitor implements LintAnalysis {
+|\pause|
+    private static final String WARNING = 
+        "Definition of %s shadows a builtin function or constant.";
+|\pause|
+    private Lint lint;
+    private BuiltinQuery query = Builtin.getBuiltinQuery();
+    private Set<String> reported = new HashSet<String>();
+|\pause|
+    public Shadowing(AnalysisKit kit) {
+        super(kit.getAST());
+    }
+
+    public void analyze(Lint lint) {
+        this.lint = lint;
+        this.tree.analyze(this);
+    }
+|\pause|
+    private Message shadow(ASTNode node, String name) {
+        return Message.regarding(node, "SHADOW_BUILTIN", String.format(WARNING, name));
+    }
+|\pause|
+    @Override
+    public void caseDefinition(Name node) {
+        if (reported.contains(node.getID()))
+            return;
+        if (query.isBuiltin(node.getID())) {
+            lint.report(shadow(node, node.getID()));
+            reported.add(node.getID());
+        }
+    }
+}
+\end{lstlisting}
+\end{frame}
+
+\begin{frame}[fragile]{Sample output}
+This input ({\tt test.m})
+\begin{lstlisting}[basicstyle=\ttfamily]
+x = 1:100;
+sum = 0;
+for i = 1:100
+    sum = sum + x(i);
+end
+\end{lstlisting}
+Produces this output (assuming this is the only analysis)
+\begin{lstlisting}
+test.m [2, 1]: (SHADOW_BUILTIN) Definition of sum shadows a builtin function or constant.
+test.m [3, 5]: (SHADOW_BUILTIN) Definition of i shadows a builtin function or constant.
+\end{lstlisting}
+\end{frame}
+
+\begin{frame}{Implemented so far}
+\begin{itemize}
+\item Trivial checks
+    \begin{itemize}
+    \item Loop variables changed inside loop
+    \item Statements that print output (i.e. not ending with {\tt ;})
+    \item Names that shadow builtin names
+    \item Unreachable code
+    \end{itemize}
+\item Slightly more complicated
+    \begin{itemize}
+    \item Loop invariant computations
+    \item Unused variables
+    \end{itemize}
+\end{itemize}
+\end{frame}
+
+\begin{frame}[fragile]{Loop invariants}
+\begin{lstlisting}[basicstyle=\ttfamily]
+sum = 0;
+for i = 1:100
+    sum = sum + i*f(100);
+end
+\end{lstlisting}
+Want to say "consider computing {\tt f(100)} outside the loop". 
+\begin{itemize}
+\item Reaching definitions!
+\item For every expression in a loop body
+    \begin{itemize}
+    \item Gather all the names used
+    \item Check whether any of their reaching definitions are inside the loop. 
+        \begin{itemize}
+        \item If not, mark as invariant. 
+        \item Also mark as invariant if there are reaching definitions
+        inside the loop, but with a right hand side previously marked
+        invariant.
+        \end{itemize}
+    \end{itemize}
+    \item Repeat until a fixed point is reached.
+\end{itemize}
+\end{frame}
+\section{Results}
+\begin{frame}{Results}
+\begin{itemize}
+\item Can be hard to quantify...
+    \begin{itemize}
+    \item We made the code 37\% more readable!
+    \end{itemize}
+\item For those analyses dealing with performance issues, 
+can run {\tt mclint}, address all the warnings, then see if performance
+improves.
+\item A common problem with tools like this is that they end up generating
+many many warnings about true but ultimately trivial things.
+    \begin{itemize}
+    \item How do you measure how useful a warning is?
+    \end{itemize}
+\end{itemize}
+\end{frame}
+
+\begin{frame}{Future work}
+\begin{itemize}
+\item Framework stuff
+\begin{itemize}
+    \item Improve API, analyses require some boilerplate
+    \item Configuration
+    \begin{itemize}
+        \item Suppress specific warnings
+        \item Pass options to specific analyses
+    \end{itemize}
+    \item Better plugin system
+    \begin{itemize}
+        \item All sorts of weird classpath issues now...
+        \item More sophisticated search paths, e.g. install analyses
+            for a certain user or certain project
+        \item How to deal with analyses that have dependencies?
+    \end{itemize}
+    \item Support running analyses on IRs
+\end{itemize}
+\item Analysis stuff
+\begin{itemize}
+    \item Growing array analysis
+    \item More analyses
+\end{itemize}
+\item Other stuff
+\begin{itemize}
+    \item Domain specific language to specify properties to check
+\end{itemize}
+\end{itemize}
+\end{frame}
+
+\end{document}
