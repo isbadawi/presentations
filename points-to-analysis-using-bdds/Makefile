@@ -5,4 +5,4 @@ slides.pdf: slides.tex bib.bib
 	pdflatex slides.tex
 
 clean:
-	rm *.aux *.bbl *.blg *.log *.nav *.out *.snm *.toc *.pdf
+	rm *.aux *.bbl *.blg *.log *.nav *.out *.snm *.toc *.vrb *.pdf
