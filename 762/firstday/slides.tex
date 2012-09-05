@@ -1,0 +1,116 @@
+\documentclass{beamer}
+\title[COMP762 paper proposals]{COMP762 paper proposals}
+\date{September 5, 2012}
+\author{Ismail Badawi}
+
+\begin{document}
+\begin{frame}
+\titlepage
+\end{frame}
+
+
+
+\begin{frame}{My research area}
+\begin{itemize}
+\item Applications of compiler tools and techniques to software engineering.
+\item This includes things like static program analysis, bug detection, 
+programmer tools for e.g. automated refactoring, IDEs...
+\item My COMP621 project was McLint, a static code analyzer for MATLAB;
+my thesis will likely be something related to that
+\end{itemize}
+\end{frame}
+
+\begin{frame}{Table of Contents}
+\begin{enumerate}
+\item Remedying the Eval that Men Do (July 2012) \\ Simon Holm Jensen, Peter A. Jonsson, Anders M\o ller \\ Aarhus University, Denmark
+\item Cecil: A Sequencing Constraint Language for Automatic Static Analysis
+Generation (1999) \\ Kurt M. Olender, Leon J. Osterweil, University of Colorado
+\item A Graph-Free Approach to Data-Flow Analysis (2002) \\ Markus Mohnen, RWTH Aachen University, Germany
+\item Combined Static and Dynamic Analysis (2005) \\ Cyrille Artho, ETH Zurich, Switzerland \\ Armin Biere, Johannes Kepler University, Austria
+\end{enumerate}
+\end{frame}
+
+\begin{frame}{Remedying the Eval that Men Do}
+\begin{itemize}
+\item Traditional wisdom: "{\tt eval} is evil. Avoid it."
+\item Last year, Richards et al. published a study analyzing real-world 
+usage of {\tt eval} in JavaScript
+\item "We have recorded the behavior of 337 MB of strings given as
+arguments to 550,358 calls to the {\tt eval} function exercised in over
+10,000 web sites."
+\item "Although {\tt eval} is pervasive, we can expect that relatively few
+web sites (around 25\%) use {\tt eval} in ways that are truly challenging to
+reason about with static analysis."
+\item Common example: {\tt eval('object.' + property)} instead of {\tt object[property]} 
+\item Idea: "eliminate {\tt eval} calls soundly and automatically by
+incorporating refactoring into the fixpoint computation of a dataflow
+analyzer"
+\end{itemize}
+\end{frame}
+
+\begin{frame}{Cecil: A Sequencing Constraint Language for Automatic Static Analysis Generation}
+\begin{itemize}
+\item Static analysis tools are often limited; typically some small number
+of builtin analyses, maybe a plugin mechanism to write more
+\item In many cases, the things we want to check are simple enough.
+\item Idea: introduce a language that can be used for specifying certain
+kinds of constraints, and mechanically generate dataflow analyses to check
+them.
+\item This paper motivates and introduces the Cecil language and shows in
+the abstract how to go about generating analyses
+\item Another paper (Cesar: A Static Sequencing Constraint Analyzer) deals
+with more pragmatic considerations of how do this with real programs.
+\end{itemize}
+\end{frame}
+
+\begin{frame}{Motivating example}
+\begin{itemize}
+\item Say you're working with Fortran, and you define three kinds of events:
+$d$, variable definition, $r$, variable reference, and $u$, variable
+undefinition
+\item Then you can characterize certain kinds of errors as just sequences
+of these events: $\langle d, d \rangle$ is an unused variable or redundant
+definition, $\langle u, r\rangle$ is referencing an undefined variable.
+\item Generalize this; let users specify their own events, and let
+constraints be essentially regular expressions over the set of events
+\item There's an algorithm for taking a constraint like this and generating
+an analysis to check it against a given flowgraph. 
+\end{itemize}
+\end{frame}
+
+\begin{frame}{A Graph-Free Approach to Data-Flow Analysis}
+\begin{itemize}
+\item The classical way to do dataflow analysis uses a control flow graph;
+start with an initial approximation, and propagate dataflow facts along
+control flow edges until you reach a fixed point.
+\item This paper presents an alternative algorithm which is 
+"execution-based"; rather than model control flow with a CFG, execute the
+actual instructions of the program on abstract values.
+\item Advantages of this
+    \begin{itemize}
+    \item Lower memory usage since you don't need a CFG
+    \item Better cache locality since you can get away with using only arrays
+    \item No need to model the semantics of the program (which typically
+    implies some pre or post processing) since you can just execute the program itself
+\end{itemize}
+\item An implementation targeting the JVM is presented.
+\end{itemize}
+\end{frame}
+
+\begin{frame}{Combined Static and Dynamic Analysis}
+\begin{itemize}
+\item Dynamic analysis, as opposed to static analysis, refers to analyzing
+the behavior of actual executions of a program on various inputs.
+\item This paper builds on the previous one. Idea: with this execution-based
+approach to static analysis, static and dynamic analyses are similar enough
+to be combined.
+\item Try to "abstract out the environment", and end up with generic
+analyses that can be run in either a static or dynamic context.
+\item This can lead to novel things like running an analysis statically to
+guide the selection of test cases, then running it dynamically against
+those test cases to verify behavior.
+\item An implementation targeting the JVM is presented.
+\end{itemize}
+\end{frame}
+
+\end{document}
