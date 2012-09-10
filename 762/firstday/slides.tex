@@ -27,6 +27,7 @@ my thesis will likely be something related to that
 Generation (1999) \\ Kurt M. Olender, Leon J. Osterweil, University of Colorado
 \item A Graph-Free Approach to Data-Flow Analysis (2002) \\ Markus Mohnen, RWTH Aachen University, Germany
 \item Combined Static and Dynamic Analysis (2005) \\ Cyrille Artho, ETH Zurich, Switzerland \\ Armin Biere, Johannes Kepler University, Austria
+\item A Portable Compiler-Integrated Approach to Permanent Checking (2006) \\ Nic Volanschi, mygcc
 \end{enumerate}
 \end{frame}
 
@@ -110,6 +111,19 @@ analyses that can be run in either a static or dynamic context.
 guide the selection of test cases, then running it dynamically against
 those test cases to verify behavior.
 \item An implementation targeting the JVM is presented.
+\end{itemize}
+\end{frame}
+
+\begin{frame}{A Portable Compiler-Integrated Approach to Permanent Checking}
+\begin{itemize}
+\item Premise: we have lots of tools for program checking, but most people
+don't use them -- why not integrate them into the compiler itself
+\item Lots of cool ideas in this paper!
+\item Unparsed patterns -- instead of parsing them, you pretty-print the AST
+\item Checks specified as reachability queries on a CFG -- is there a path
+from statement X to statement Y avoiding statement Z?
+\item An implementation is presented in the form of a patched
+version of {\tt gcc}
 \end{itemize}
 \end{frame}
 
