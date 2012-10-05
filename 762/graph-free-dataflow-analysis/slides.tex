@@ -132,6 +132,8 @@ a_y \, op \, a_z & \text{if } y = a_y \in \mathbb{Z} \text{ or } c(y) = a_y \in 
 \bot & \text{otherwise}
 \end{cases}$
 \end{itemize}
+\item The initial value for the entry of $P$ is 
+$x \mapsto \bot \, \forall \, x$
 \end{itemize}
 \end{frame}
 
@@ -139,17 +141,18 @@ a_y \, op \, a_z & \text{if } y = a_y \in \mathbb{Z} \text{ or } c(y) = a_y \in 
 To make sure we understand this way of specifying a data-flow problem by
 describing abstract values and the way the instructions act on them, let's
 state another well-known data-flow problem this way: reaching definitions.
+Describe (a) the abstract values (b) the abstract semantics
 
-\begin{itemize}
-\item The abstract values are: \pause Sets of definitions (instruction labels)
-\item The abstract semantics are: \pause
+\begin{enumerate}[(a)]
+\pause \item Sets of definitions (instruction labels)
+\pause \item The abstract semantics are:
 \begin{itemize}
 \item $![${\tt goto l}$!] = \, ![${\tt if} $\psi$ {\tt goto l}$!] = id$
 \item $![${\tt d: x := y op z}$!] = c \mapsto \{d\} \cup (c \setminus defs(x))$
 \end{itemize}
-\item Similar to the $gen$ and $kill$ sets presentation we saw; can think
+\end{enumerate}
+Similar to the $gen$ and $kill$ sets presentation we saw; can think
 of the semantics mapping in sets to out sets
-\end{itemize}
 \end{frame}
 
 \begin{frame}{Another question for you}
@@ -210,7 +213,7 @@ $SIG(P)$:
 \draw [->] (i8) to [out=270, in=270] (i4);
 \end{tikzpicture}
 \\ Often, we want information for each program point, so this is useful,
-even though many instructions will have the same information.
+but not as efficient as it could be.
 \end{frame}
 
 \begin{frame}[fragile]{Basic-block graphs}
@@ -235,7 +238,7 @@ to basic blocks in a straightforward way using function composition:
 $$ ![I_0 \dots I_n!] := \, ![I_n!] \circ \dots \circ ![I_0!] $$
 \end{frame}
 
-\begin{frame}{The algorithm}
+\begin{frame}{The algorithm: basic idea}
 \begin{itemize}
 \item Uses $BBG(P)$, a working set $W$ of nodes to visit, and an
 associative array $a$ mapping nodes to abstract values.
@@ -244,15 +247,50 @@ associative array $a$ mapping nodes to abstract values.
 some non-deterministic choice)
 \item Compute a new abstract value for $B$ based on its current value and
 the values of its predecessors
-\item If this new value is different, update the old one, and and all of 
+\item If this new value is different, update the old one, and add all of 
 $B$'s successors to $W$.
 \end{itemize}
 Once we're done, we can propagate the information back to the level of
 single instructions.
 \end{frame}
 
+\begin{frame}{The algorithm: initialization}
+Input: $(P = (I_0,\dots,I_n), L = \langle A, \sqcap, \sqcup, \rangle, ![.!], a_0)$ \\
+Output: $s_0, \dots, s_n \in A$ 
+
+\bigskip
+{\tt G = (BB(P), E, B0) := BBG(P)} \\
+{\tt a[B0] := a0} \\
+{\tt for each B} $\in$ {\tt BB(P)} $\setminus$ {\tt B0 do a[B] :=} $\top$ \\
+{\tt W := BB(P)}
+\end{frame}
+
+\begin{frame}{The algorithm: main loop}
+\smallskip
+{\tt while W} $\neq \varnothing$ {\tt do} \\
+$\, \,$ {\tt choose B} $\in$ {\tt W} \\
+$\, \,$ {\tt W := W} $\setminus$ {\tt B} \\
+$\, \,$ {\tt new := a[B]} \\
+$\, \,$ {\tt for each B'} $\in$ {\tt pred(B) do new := new} $\sqcap$ {\tt ![B'!](a[B'])} \\
+$\, \,$ {\tt if new} $\neq$ {\tt a[B] then} \\
+$\, \, \, \, \, \,$ {\tt a[B] := new} \\
+$\, \, \, \, \, \,$ {\tt W := W} $\cup$ {\tt succ(B)} \\ 
+$\, \,$ {\tt end} \\
+{\tt end}
+\end{frame}
+
+\begin{frame}{The algorithm: post-processing}
+\smallskip
+{\tt for each B} $\in$ {\tt BB(P) do} \\
+$\, \,$ {\tt with B = I[k...l] do} \\
+$\, \, \, \, \, \,$ {\tt s[k] := a[B]} \\
+$\, \, \, \, \, \,$ {\tt for i := k + 1 to l do s[i] := ![I[i-1]!](s[i-1])} \\
+$\, \,$ {\tt end} \\
+{\tt end}
+\end{frame}
+
 \begin{frame}{Execution on our example}
-\includegraphics[scale=0.5]{classic.png}
+\includegraphics[scale=0.35]{classic.png}
 \end{frame}
 
 \section{New evaluation-based algorithm}
@@ -260,9 +298,148 @@ single instructions.
 \begin{itemize}
 \item Uses an array of instructions $I$, a working set of program counters
 $W$, and a parallel array of abstract values $a$
+\item Initialize $W$ to $\{0,\dots,n\}$. While $W$ is not empty:
+\item Pick a program counter $pc \in W$
+\item Propagate abstract values along an entire path of computation starting
+at $pc$, until values don't change or $pc = n + 1$; remove each visited
+$pc$ from $W$ as you go
+\end{itemize}
+No post-processing necessary since we're already dealing with instructions.
+\end{frame}
+
+\begin{frame}{The algorithm: initialization}
+\smallskip
+{\tt s[0] = a0} \\
+{\tt for i := 1 to n do s[i] =} $\top$ \\
+{\tt W := set(0, ..., n)}
+\end{frame}
+
+\begin{frame}{The algorithm: main loop}
+\smallskip
+\begin{footnotesize}
+{\tt while W} $\neq \varnothing$ {\tt do} \\
+$\, \,$ {\tt choose pc} $\in$ {\tt W} \\
+$\, \,$ {\tt repeat} \\
+$\, \, \, \, \, \,$ {\tt W := W} $\setminus$ {\tt pc} \\
+$\, \, \, \, \, \,$ {\tt new := ![I[pc]!](s[pc])} \\
+$\, \, \, \, \, \,$ {\tt if I[pc] = (goto l) then pc' := l} \\
+$\, \, \, \, \, \,$ {\tt else} \\
+$\, \, \, \, \, \, \, \, \, \, \, \,$ {\tt pc' := pc + 1} \\
+$\, \, \, \, \, \, \, \, \, \, \, \,$ {\tt if I[pc] = (if} $\psi$ {\tt goto l) and new < s[l] then} \\
+$\, \, \, \, \, \, \, \, \, \, \, \, \, \, \, \, \, \,$ {\tt W := W + l} \\
+$\, \, \, \, \, \, \, \, \, \, \, \, \, \, \, \, \, \,$ {\tt s[l] := new} \\
+$\, \, \, \, \, \, \, \, \, \, \, \,$ {\tt end} \\
+$\, \, \, \, \, \,$ {\tt end} \\
+$\, \, \, \, \, \,$ {\tt if new < s[pc'] then} \\
+$\, \, \, \, \, \, \, \, \, \, \, \,$ {\tt s[pc'] := new} \\
+$\, \, \, \, \, \, \, \, \, \, \, \,$ {\tt pc := pc'} \\
+$\, \, \, \, \, \,$ {\tt else pc := n + 1} \\
+$\, \, \, \, \, \,$ {\tt end} \\
+$\, \,$ {\tt until pc = n + 1} \\
+$\, \,$ {\tt end} \\
+{\tt end} \\
+\end{footnotesize}
+\end{frame}
+
+\begin{frame}{Execution on our example}
+\includegraphics[scale=0.35]{bb.png}
+\end{frame}
+
+\begin{frame}{Last question}
+Really the same question as before, but in terms of the code here. What
+has to change here to handle (a) may problems and (b) backward problems?
+\begin{enumerate}[(a)]
+\pause
+\item Replace both $<$ by $>$
+\pause
+\item This one is more complicated. You could add some synthetic
+instructions connecting jump targets to the originating jump
+\end{enumerate}
+\end{frame}
+
+\section{Implementation on the JVM}
+
+\begin{frame}{Infrastructure}
+\begin{itemize}
+\item Implemented as part of the jDFA framework, using the bytecode
+engineering library (BCEL)
+\item Defines an {\tt Abstraction} interface to represent the behavior
+of instructions on abstract values. Main methods:
+\begin{itemize}
+\item {\tt Function getAbstract(InstructionHandle ih)}
+\item {\tt Object getInitialValue(InstructionHandle ih)}
+\item {\tt Lattice getLattice()}
+\end{itemize}
+where {\tt Function} is a class that holds domain and range sets, and
+provides an {\tt apply} method.
+\item Defines an abstract {\tt Solver} class that takes an {\tt Abstraction}
+and an {\tt InstructionList} and provides a {\tt getSolution()} method;
+implementations -- {\tt FlowGraphSolver} and {\tt ExecutionSolver}
+\end{itemize}
+\end{frame}
+
+\begin{frame}{Sample {\tt Abstraction}}
+\begin{itemize}
+\item {\tt CFPAbstraction} (CFP: Constant folding propagation)
+\item Details kind of complicated; uses a {\tt Lattice} to describe the
+state of local variable slots, and another to describe the state of the
+stack
+\item BCEL provides a class hierarchy for JVM instructions -- common
+superclass {\tt ArithmeticInstruction} represents instructions like
+{\tt dadd, isub, fmul, ldiv}, $\dots$, {\tt ConversionInstruction}
+represents instructions like {\tt l2i, i2d}, $\dots$
+\item Basically implements {\tt getAbstract()} as a big if-else chain
+of {\tt instanceof} checks; in each case return a {\tt Function} modeling
+that kind of instruction
+\item Intraprocedural: for method calls, assign $\top$ to return value.
 \end{itemize}
 \end{frame}
 \section{Evaluation}
+
+\begin{frame}{Experimental framework}
+\begin{itemize}
+\item Large set of samples (15339 classes, total of 98947 methods), 
+including the JRE (1.2), ANTLR, BCEL, compiled using various compilers
+\item Also established a web site where people could donate class files
+\end{itemize}
+The new algorithm is expected to behave better memory-wise. On the other
+hand, because it doesn't deal with basic blocks, it's expected to have
+worse performance, especially in cases with huge basic block reductions.
+\end{frame}
+
+\begin{frame}{Memory}
+\begin{itemize}
+\item For each method, measured $\frac{m_X}{m_c} \cdot 100$, where $m_X$ is
+the number of bytes allocated by the execution algorithm, and $m_C$ is the
+number of bytes allocated by the classic algorithm; lower is better
+\item Reductions ranging from $74.61\%$ to $7.28\%$, with an average of
+$30.83\%$ and a median of $31.28\%$. Algorithm \emph{always} reduced
+memory usage!
+\end{itemize}
+\end{frame}
+
+\begin{frame}{Memory (visually)}
+\includegraphics[scale=0.35]{histogram.png} \\
+\includegraphics[scale=0.35]{memory.png}
+\end{frame}
+
+\begin{frame}{Performance}
+\begin{itemize}
+\item Measured the speedup $\frac{t_C}{t_X}$, where $t_C$ is the runtime
+of the classic algorithm and $t_X$ of the execution algorithm; higher is
+better
+\item Huge distribution; speedups ranging from $291.2$ down to $0.015$.
+Average was $1.62$, median $1.33$, variance $7.49$ (which is low)
+\item Conclusion: for a majority of methods, the new algorithm performs as
+well as the classical algorithm
+\item (And speedups \emph{are} higher with better basic block reductions.)
+\end{itemize}
+\end{frame}
+
+\begin{frame}{Performance (visually)}
+\includegraphics[scale=0.35]{histogram2.png} \\
+\includegraphics[scale=0.35]{performance.png}
+\end{frame}
 
 \begin{frame}{References}
 \bibliographystyle{plain}
