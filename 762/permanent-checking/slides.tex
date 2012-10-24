@@ -1,0 +1,93 @@
+\documentclass{beamer}
+\usepackage{listings}
+\usepackage{enumerate}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{tikz}
+\usepackage{graphicx}
+\title[A portable compiler-integrated approach to permanent checking]
+{A portable compiler-integrated approach to permanent checking}
+\date{October 31, 2012}
+
+\author[Nic Volanschi]{Nic Volanschi}
+\begin{document}
+
+\AtBeginSection[]
+{
+    \begin{frame}{Table of Contents}
+        \tableofcontents[currentsection]
+    \end{frame}
+}
+
+\begin{frame}
+\nocite{NV}
+\nocite{Unparsed}
+\nocite{Condate}
+\titlepage
+\begin{center}
+Presented by Ismail Badawi
+\end{center}
+\end{frame}
+
+\begin{frame}{Table of Contents}
+\tableofcontents
+\end{frame}
+
+\section{Overview}
+\begin{frame}{What are we talking about?}
+\begin{itemize}
+\item A compiler integrated approach to permanent checking, published in ASE 2008
+\item Program checking tools are mature and useful
+\begin{itemize}
+\item Static analyzers, model checkers, formal verification tools...
+\end{itemize}
+\item But they're not really widely used. Why not?
+\begin{itemize}
+\item They can often be too slow for everyday use
+\item Some are quite difficult to use
+\item They're decoupled from the rest of the development process
+\end{itemize}
+\item Premise: let's integrate program checking into the compiler
+\end{itemize}
+\end{frame}
+
+\begin{frame}{Okay, but...}
+\begin{itemize}
+\item To make this viable, checking shouldn't take too long relative to
+the build time
+\begin{itemize}
+\item e.g. full-blown model checkers take a long time to run; 
+programmers aren't going to want to do this on every compile
+\end{itemize}
+\item Tradeoff: power and precision vs. speed, usability
+\item Here we focus on the latter
+\item It would also be nice if the approach was as language agnostic as
+possible, to make it easy to integrate it into many different compilers
+for many different languages
+\end{itemize}
+\end{frame}
+
+\begin{frame}{Interesting ideas}
+\begin{itemize}
+\item Unparsed patterns: easy to implement language independent 
+pattern-matching technique
+\item Program properties expressed as reachability queries over the
+control-flow graph, together with data flow constraints
+\item Proof of concept; entire thing implemented as a 1000-line patch
+to {\tt gcc}, and successfully used to check properties in the Linux kernel
+\end{itemize}
+\end{frame}
+
+\section{Unparsed patterns}
+\begin{frame}{Pattern matching}
+\end{frame}
+\section{Condate}
+\section{Evaluation}
+
+\begin{frame}{References}
+\bibliographystyle{plain}
+{\footnotesize
+\bibliography{bib}}
+\end{frame}
+
+\end{document}
