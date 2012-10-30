@@ -79,9 +79,213 @@ to {\tt gcc}, and successfully used to check properties in the Linux kernel
 \end{frame}
 
 \section{Unparsed patterns}
-\begin{frame}{Pattern matching}
+\begin{frame}[fragile]{Pattern matching}
+\begin{itemize}
+\item Generally useful in program manipulation tools
+\item Typically reduced to tree matching
+\item \begin{verbatim}
+for(i = 0; i < 100; ++i)
+    a[i] = 0;
+\end{verbatim}
+\begin{itemize}
+\item Tree pattern:
+\begin{verbatim}
+for_stmt(assign_expr(X, int_literal(0)),
+         less_expr(X, N),
+         preincr_expr(X),
+         expr_stmt(assign_expr(array_expr(Y, X), 
+                               int_literal(0))))
+\end{verbatim}
+\item Concrete syntax pattern
+\begin{verbatim}
+for(%x = 0; %x < %n; ++%x)
+    %y[%x] = 0;
+\end{verbatim}
+\end{itemize}
+\end{itemize}
 \end{frame}
+
+\begin{frame}{Problems}
+\begin{itemize}
+\item Tree patterns
+\begin{itemize}
+\item Easy to parse
+\item Requires pattern writer to be familiar with AST structure / notation
+\item Verbose, not very readable
+\end{itemize}
+\item Concrete syntax patterns
+\begin{itemize}
+\item Much easier to read and write
+\item Difficult to parse; essentially need to modify a parser of the
+subject language to allow meta-variables, and parsing of arbitrary program
+fragments
+\end{itemize}
+\end{itemize}
+\end{frame}
+
+\begin{frame}{Unparsed pattern}
+\begin{itemize}
+\item A form of concrete syntax pattern; literal program fragments together
+with meta-variables
+\item Meta-variables: {\tt \%x}, where {\tt x} is a single character, stands
+for an arbitrary subtree of an AST
+\item e.g. {\tt \%L = \%L->next} matches {\tt l = l->next}, {\tt buf[i] = buf[i]->next}, but not {\tt l = buf[0]->next}
+\item (allow {\tt \%\_} for matching trees we don't care about)
+\item Key idea: patterns like this can be matched against an AST efficiently without ever parsing them
+\end{itemize}
+\end{frame}
+
+\begin{frame}{Lazy unparsing}
+\begin{itemize}
+\item The matching algorithm is based on \emph{lazy unparsing} of an AST.
+\item Instead of unparsing an AST to a string, unparse just one level,
+returning a list of strings and subtrees
+\item e.g. unparsing {\tt a[0] * b[1]} might give
+{\tt [AST('a[0]'), '*', AST('b[1]')]}
+\item Not difficult to modify an existing pretty-printer to do this; just
+add subtrees to a list instead of recursing on them
+\end{itemize}
+\end{frame}
+
+\begin{frame}{Matching algorithm}
+\begin{itemize}
+\item Input: an unparsed pattern $p$ (as a string), and an AST $t$
+\item Output: a substitution $\sigma$ mapping meta-variables to subtrees of $t$ if successful (or an error)
+\item Expressed a set of rewrite rules over triples $\langle s, p, \sigma \rangle$, where $s$ is the unparse stack, $p$ is the pattern stream, and $\sigma$ is the substitution
+\item Initial state: $\langle [t], p, \{\} \rangle$. Final state: $\langle [], [], \sigma \rangle$ if successful, or a state in which no rule applies
+\end{itemize}
+\end{frame}
+
+\begin{frame}{Three basic operations}
+\begin{enumerate}
+\item \emph{Bind}; bind the meta-variable at the front of the stream to
+the tree on top of the stack.
+\item \emph{Unparse}; pop the tree at the top of the stack, and push its
+unparsed list
+\item \emph{Lookahead}; look at the second element on the stack.
+\begin{itemize}
+\item $lookahead([], []) = true$
+\item $lookahead([e|s], k + p) = (first\_token(e) = k)$
+\item $lookahead([t|s], "\%x" + p) = true$
+\item otherwise $false$
+\end{itemize}
+\end{enumerate}
+\end{frame}
+
+\begin{frame}{Rewrite rules}
+\begin{enumerate}
+\pause
+\item $\langle [k|s], k + p, \sigma \rangle \longrightarrow \langle s, p, \sigma \rangle$ \\
+if top of the stack is a string $k$, and the pattern starts with $k$,
+consume both
+\pause
+\item $\langle [t|s], k + p, \sigma \rangle \longrightarrow \langle unparsed(t) + s, k + p, \sigma \rangle $ \\
+if top of the stack is a tree $t$, and the pattern starts with a string (as
+opposed to a meta-variable), unparse
+\pause
+\item $\langle [t|s], "\%x" + p, \sigma \rangle \longrightarrow \langle unparsed(t) + s, "\%x" + p, \sigma \rangle $ \\ $ \,\,\,\, \text{if } \neg lookahead(s, p)$ \\
+if top of the stack is a tree $t$, and the pattern starts with a meta-variable, but binding would cause lookahead to fail, unparse
+\end{enumerate}
+\end{frame}
+
+\begin{frame}{Rewrite rules (cont.)}
+\begin{enumerate}
+\setcounter{enumi}{3}
+\pause
+\item $\langle [t|s], "\%x" + p, \sigma \rangle \longrightarrow \langle s, p, \sigma \cup \{x \leftarrow t \} \rangle$ \\ $ \,\,\,\, \text{if } x \not \in \sigma \wedge lookahead(s, p)$ \\
+if top of the stack is a tree $t$, and the pattern starts with a meta-variable which is not already bound, and binding is safe, then bind
+\pause
+\item $\langle [t|s], "\%x" + p, \sigma \rangle \longrightarrow \langle (s, p, \sigma \rangle$ \\ $ \,\,\,\, \text{if } x \in \sigma \wedge \sigma(x) = t \wedge lookahead(s, p)$ \\
+if top of the stack is a tree $t$, and the pattern starts with a meta-variable which is bound but to a tree equivalent to $t$, and binding is safe, consume both
+\end{enumerate}
+\end{frame}
+
+\begin{frame}{Example match}
+Match {\tt repmat(0, \%x)} against the tree for {\tt repmat(0, 4, 4)}. 
+\begin{tiny}
+\begin{tabular}{| l | l | l | l |}
+\hline
+Rule & Stack & Pattern & $\sigma$ \\ \hline
+& $[AST({\tt repmat(0, 4, 4)})]$ & {\tt repmat(0, \%x)} & $\{\}$ \\ \hline
+2 & $[AST({\tt repmat}), {\tt '('}, AST({\tt 0, 4, 4}), {\tt ')'}]$ & {\tt repmat(0, \%x)} & $\{\}$ \\ \hline
+2 & $[{\tt 'repmat'}, {\tt '('}, AST({\tt 0, 4, 4}), {\tt ')'}]$ & {\tt repmat(0, \%x)} & $\{\}$ \\ \hline
+1 & $[{\tt '('}, AST({\tt 0, 4, 4}), {\tt ')'}]$ & {\tt (0, \%x)} & $\{\}$ \\ \hline
+1 & $[AST({\tt 0, 4, 4}), {\tt ')'}]$ & {\tt 0, \%x)} & $\{\}$ \\ \hline
+2 & $[AST({\tt 0}), {\tt ','}, AST({\tt 4,4}), {\tt ')'}]$ & {\tt 0, \%x)} & $\{\}$ \\ \hline
+2 & $[{\tt '0'}, {\tt ','}, AST({\tt 4,4}), {\tt ')'}]$ & {\tt 0, \%x)} & $\{\}$ \\ \hline
+1 & $[{\tt ','}, AST({\tt 4,4}), {\tt ')'}]$ & {, \%x)} & $\{\}$ \\ \hline
+1 & $[AST({\tt 4,4}), {\tt ')'}]$ & {\%x)} & $\{\}$ \\ \hline
+4 & $[{\tt ')'}]$ & {\tt )} & $\{x \leftarrow AST({\tt 4,4})\}$ \\ \hline
+1 & $[]$ & & $\{x \leftarrow AST({\tt 4,4})\}$ \\ \hline
+\end{tabular}
+\end{tiny}
+\end{frame}
+
+\begin{frame}{Assessment}
+Unparsed patterns are nice because
+\begin{itemize}
+\item They're trivial to write for any programmer
+\item The implementation is relatively simple compared to techniques
+based on parsing and tree matching
+\item Aside from the unparsing (which isn't very much work), the technique
+is completely language independent
+\end{itemize}
+\end{frame}
+
 \section{Condate}
+\begin{frame}{What's next?}
+\begin{itemize}
+\item Unparsed patterns allow us to match arbitrary code constructs, but
+they're purely syntactic
+\item It would be useful to also incorporate control flow, data flow, 
+semantics into our properties
+\item It is known that many dataflow analyses can be expressed as graph
+reachability problems on an exploded program graph, intuitively the product
+of a CFG with a value-flow graph (Reps, POPL '95)
+\item Idea: many useful properties can be expressed as reachability problems
+directly on the CFG, skipping the construction of the above product
+\end{itemize}
+\end{frame}
+
+\begin{frame}{Constrained reachability queries}
+\begin{itemize}
+\item Is there a path from a statement $f$ to a statement $t$ avoiding
+statements $v$, where $f$, $t$ and $v$ are unparsed patterns?
+\item e.g. memory leaks: is there a path from {\tt \%x = malloc(\%\_)} to
+the exit node avoiding {\tt free(\%x)}?
+\pause
+\item e.g. potential null deference: is there a path from {\tt \%x = malloc(\%\_)}
+to {\tt *\%x} avoiding {\tt if (\%x != 0)}?
+\pause
+\item That last one isn't quite right. What's missing?
+\end{itemize}
+\end{frame}
+
+\begin{frame}{Outcome of tests}
+\begin{itemize}
+\item from {\tt \%x = malloc(\%\_)} to {\tt *\%x} avoiding {\tt if (\%x != 0)}
+\item We're ignoring the outcome of the check! There could still be null
+deferences in the {\tt else} block.
+\item We'd like to say: from {\tt \%x = malloc(\%\_)} to {\tt *\%x} avoiding \emph{successful} tests {\tt \%x != 0} (or unsuccessful tests {\tt \%x == 0})
+\end{itemize}
+\end{frame}
+
+\begin{frame}{Condate definition}
+$$ S \rightarrow {\tt from} \, D \,  [{\tt to} \, D \, [{\tt avoid} \, D]] $$
+$$ D \rightarrow E \, | \, E \, {\tt or } \, E $$
+$$ E \rightarrow P \, | \, +P \, | \, -P $$
+$$ P \rightarrow "(\%V | lit)*" \, [|\, expr] $$
+\end{frame}
+
+\begin{frame}[fragile]{Example Condate checker}
+A simple check for use-after-free bugs:
+\begin{verbatim}
+from "kfree_skb(\%X)" or "dev_kfree_skb_any(\%X)" or 
+     "kfree(\%X)"
+to "\%_ = \%X->\%_" or "\%X->\%_ = \%_"
+avoid "\%X = \%_"
+\end{verbatim}
+\end{frame}
 \section{Evaluation}
 
 \begin{frame}{References}
