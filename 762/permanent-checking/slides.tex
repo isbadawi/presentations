@@ -36,7 +36,8 @@ Presented by Ismail Badawi
 \section{Overview}
 \begin{frame}{What are we talking about?}
 \begin{itemize}
-\item A compiler integrated approach to permanent checking, published in ASE 2008
+\item A compiler integrated approach to permanent checking, published in ASE 08
+\item (companion conference paper: Condate (PPDP 06))
 \item Program checking tools are mature and useful
 \begin{itemize}
 \item Static analyzers, model checkers, formal verification tools...
@@ -232,6 +233,15 @@ is completely language independent
 \end{itemize}
 \end{frame}
 
+\begin{frame}{But wait}
+The algorithm we've seen matches a pattern against an entire tree; it
+doesn't find matches.
+
+Find matches by just iterating over statements and applying the matching
+algorithm. It turns out this is fine because the implementation runs
+on three-address code (more on this later).
+\end{frame}
+
 \section{Condate}
 \begin{frame}{What's next?}
 \begin{itemize}
@@ -267,6 +277,8 @@ to {\tt *\%x} avoiding {\tt if (\%x != 0)}?
 \item We're ignoring the outcome of the check! There could still be null
 deferences in the {\tt else} block.
 \item We'd like to say: from {\tt \%x = malloc(\%\_)} to {\tt *\%x} avoiding \emph{successful} tests {\tt \%x != 0} (or unsuccessful tests {\tt \%x == 0})
+\item Condate encodes this as {\tt +"\%x != 0"} and {\tt -"\%x == 0"}
+respectively
 \end{itemize}
 \end{frame}
 
@@ -274,19 +286,225 @@ deferences in the {\tt else} block.
 $$ S \rightarrow {\tt from} \, D \,  [{\tt to} \, D \, [{\tt avoid} \, D]] $$
 $$ D \rightarrow E \, | \, E \, {\tt or } \, E $$
 $$ E \rightarrow P \, | \, +P \, | \, -P $$
-$$ P \rightarrow "(\%V | lit)*" \, [|\, expr] $$
+$$ P \rightarrow "(\%V | lit)*" $$
+\pause
+\begin{itemize}
+\item Omitting the {\tt avoid} clause: default to {\tt ""}, i.e. matches
+nothing, so pure reachability
+\item Omitting the {\tt to} clause: default to {\tt "\%\_"}, i.e. matching
+everything; this is the same as just looking for matches of the {\tt from}
+clause
+\end{itemize}
 \end{frame}
 
 \begin{frame}[fragile]{Example Condate checker}
 A simple check for use-after-free bugs:
 \begin{verbatim}
-from "kfree_skb(\%X)" or "dev_kfree_skb_any(\%X)" or 
-     "kfree(\%X)"
-to "\%_ = \%X->\%_" or "\%X->\%_ = \%_"
-avoid "\%X = \%_"
+from "kfree_skb(%X)" or "dev_kfree_skb_any(%X)" or 
+     "kfree(%X)"
+to "%_ = %X->%_" or "%X->%_ = %_"
+avoid "%X = %_"
 \end{verbatim}
 \end{frame}
+
+\begin{frame}{Regular path expressions}
+\begin{itemize}
+\item Take a CFG; each node is a program statement that doesn't contain internal control flow
+\item For control flow nodes, outgoing edges corresponding to successful tests are labeled with $+$, otherwise $-$
+\item If a pattern $p$ matches a node $n$, it matches all edges leaving $n$
+\item $+p$ matches $+$ edges that $p$ matches (similarly $-$)
+\item Define regexes as usual, with concatenation representing path
+concatenation
+\item A query like {\tt from f to t avoid v or +vt or -ve} becomes a regex like {\tt f[\textasciicircum v +vt -ve]*t}
+\end{itemize}
+\end{frame}
+
+\begin{frame}{Matching algorithm}
+\begin{itemize}
+\item This formulation motivates the development of the algorithm, as it's
+more or less a standard automaton for matching regexes
+\item Glossing over some technical details here...
+\begin{itemize}
+\item Suppose metavariables are only introduced in the {\tt from} clause
+\item Find all the matches (and corresponding substitutions) for the
+{\tt from} clause
+\item For each of these, \emph{instantiate} the query by replacing all
+metavariables with their bindings, and \emph{then} check the regex
+\item Turns out this is faster
+\end{itemize}
+\end{itemize}
+\end{frame}
+
+\begin{frame}[fragile]{Algorithm}
+\begin{verbatim}
+check(CFG, from, to, avoid)
+  substs = {}
+  for node t in CFG
+    subst = match(t, from)
+    if subst is not empty add subst to subst
+  for subst in subst
+    from', to', avoid' = instantiate(subst, from, to, avoid)
+    worklist = []
+    for node t in CFG
+      if match(t, from') then add(worklist, t)
+\end{verbatim}
+\end{frame}
+
+\begin{frame}[fragile]{Algorithm (cont.)}
+\begin{verbatim}
+    while worklist is not empty
+      t = worklist[0]
+      if visited(t) then continue
+      visited(t) = true
+      if match(t, to')
+        return success
+      else if not match(t, avoid')
+        for edge e = t -> t'
+          if not match(e, avoid')
+            add(t', worklist)
+\end{verbatim}
+\end{frame}
+
+\begin{frame}{Practical considerations}
+\begin{itemize}
+\item Unparsed pattern matching works by pretty printing the AST, but often
+you want to work on some simplified IR
+\begin{itemize}
+\item The paper presents an implementation in {\tt gcc}, which uses
+GIMPLE three-address form
+\end{itemize}
+\end{itemize}
+\end{frame}
+
+\begin{frame}[fragile]{Example}
+
+{\tt from "lock(\%X, \%Y) to "return" avoid "unlock(\%X, \%Y)"}
+
+\begin{columns}
+\column{2in}
+\begin{verbatim}
+lock(step[i+1], NOWAIT);
+critical_section(...);
+unlock(step[i+1], NOWAIT);
+return;
+\end{verbatim}
+\column{2in}
+\begin{verbatim}
+T.2 = i + 1;
+T.3 = step[T.2];
+lock(T.3, 0);
+critical_section(...)
+T.4 = i + 1;
+T.5 = step[T.4];
+unlock(T.5, 0);
+\end{verbatim}
+\end{columns}
+\vspace{10mm}
+Notice different temporaries are used for the {\tt lock} and {\tt unlock} calls. Pattern doesn't match anymore! How do we deal with this?
+\end{frame} 
+
+\begin{frame}{Basic solution: "inlining" temporaries}
+\begin{itemize}
+\item Assume temporaries are marked as such in the IR
+\item Just look up and use the definition of the temporary instead of the
+temporary itself
+\item Reconstructing the higher-level syntax; e.g. we still bind {\tt \%X}
+to {\tt step[i+1]}
+\item This can be done directly in the matching algorithm
+\end{itemize}
+\end{frame}
+
+\begin{frame}{Value numbering}
+\begin{itemize}
+\item {\tt gcc} uses global value numbering in building up GIMPLE
+\item Since {\tt T.2} and {\tt T.4} both refer to {\tt i + 1}, they'd
+actually be the same temporary
+\item Same for {\tt T.3 = step[T.2]} and {\tt T.5 = step[T.4]}
+\item So in real GIMPLE {\tt T.3} and {\tt T.5} are actually the same!
+\item So this matches, but with {\tt \%X = T.3} instead of {\tt step[i+1]};
+this might be good enough and we can avoid inlining
+\item What we had {\tt lock(\%X + 1, \%Y)}?
+\end{itemize}
+\end{frame}
+
 \section{Evaluation}
+\begin{frame}
+As mentioned, Condate was implemented as a {\tt gcc} patch; evaluation
+was performed on the Linux kernel, to try and reproduce the detection
+of bugs reported by another (much more complicated) tool. Evaluated on
+three fronts
+\begin{enumerate}
+\item Expressiveness
+\item Precision
+\item Scalability
+\end{enumerate}
+\end{frame}
+
+\begin{frame}{Testbed}
+This previous tool was called Metal, and expressed checks as arbitrary
+automata mixed with executable C code. It's obviously strictly more
+powerful than Condate, but also pretty complicated.
+
+The study on the Linux kernel included 12 different user-defined checks
+and found over 500 bugs, which were all manually confirmed by kernel
+developers.
+
+Checks like "do not use freed memory", "do not use floating point in the
+kernel", "do not deference user pointers"
+\end{frame}
+
+\begin{frame}{Expressiveness}
+\begin{itemize}
+\item Tried to express as many of the checks as possible using Condate
+\item Was able to express 9 of them (technically 11 with a feature I
+didn't mention -- calling internal compiler checks -- but they didn't
+actually implement it)
+\end{itemize}
+\end{frame}
+
+\begin{frame}[fragile]{Precision}
+\begin{itemize}
+\item Picked one checker -- checking for null deference.
+\item In the old study, it reported 121 bugs in 89 source files
+\item Condate found 117 of the 121
+\begin{itemize}
+\item Two of the missed bugs are because the allocations are hidden
+behind macros
+\item The others look like this:
+\begin{verbatim}
+if (!dev) {
+  dev = init_etherdev(dev, 0);
+}
+dev->priv = kmalloc(sizeof(struct awc_private),
+    0x02 | 0x01 | 0x04);
+\end{verbatim}
+{\tt init\_etherdev()} allocates memory only when its first argument is
+NULL. Here it obviously does, but can't tell with Condate; can only only
+use e.g. {\tt init\_etherdev(0, \%X)}.
+\end{itemize}
+\end{itemize}
+\end{frame}
+
+\begin{frame}{Precision (cont.)}
+\begin{itemize}
+\item Two false positives, both because of chained assignment in
+conditionals, e.g. {\tt if (!(x->y = x->z = malloc(...)))} and later
+dereference {\tt x->z}, but {\tt x->y} is the one that was checked against
+NULL
+\item Four new bugs!
+\end{itemize}
+\end{frame}
+
+\begin{frame}{Scalability}
+\begin{itemize}
+\item Checking overhead related to number of checkers used, number of
+matches found per pattern, and pattern size
+\item Overhead ranged from 10-15\% for a very simple checker (6 patterns)
+to 50-80\% for a complex checker (51 patterns)
+\item Maximum overhead with all checkers combined: 98\%
+\item (This is a prototype; not very optimized)
+\end{itemize}
+\end{frame}
 
 \begin{frame}{References}
 \bibliographystyle{plain}
