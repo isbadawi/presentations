@@ -32,9 +32,251 @@ Presented by Ismail Badawi
 \tableofcontents
 \end{frame}
 
-\section{Introduction}
+\begin{frame}{What are we talking about?}
+\begin{itemize}
+\item Remedying the eval that men do, ISSTA 2012
+\item {\tt eval} is ``wild''; JavaScript static analyzers tend not to
+handle it, resulting in inprecise data
+\item Recent study shows that in practice, most real-world uses of
+{\tt eval} are actually not too hard to reason about
+\item Premise: want to make JavaScript more amenable to static analysis
+by transforming code to eliminate calls to {\tt eval}
+\item Paper presents \emph{Unevalizer}, a tool that eliminates calls
+to {\tt eval} as a source-to-source transformation
+\end{itemize}
+\end{frame}
+
 \section{{\tt eval}, and {\tt eval} in JavaScript}
+\begin{frame}{{\tt eval}}
+\begin{itemize}
+\item Many programming environments provide an {\tt eval}
+function, which evaluates code as a string
+\item For interpreted languages, the interpreter can just call itself
+\item Compiled languages can also have {\tt eval}
+\end{itemize}
+\end{frame}
+
+\begin{frame}{{\tt eval} is evil}
+While {\tt eval} is very powerful, it's also very dangerous.
+\begin{itemize}
+\item Security concerns from executing untrusted user input
+\item Unpredictable side-effects
+\item Confuses static analysis; some dataflow analysis can help to
+determine what code is executed but not in general
+\end{itemize}
+\end{frame}
+
+\begin{frame}{{\tt eval} is widely used}
+\begin{itemize}
+\item The eval that men do, Richards et al., ECOOP 2011
+\item "We have recorded the behaviour of 337 MB of strings given as
+arguments to 550,358 calls to the {\tt eval} function exercised in over
+10,000 web sites."
+\item Classified uses of {\tt eval} based on the arguments passed to it
+\item Concluded that in many cases (as many as 83\%), the call could be
+rewritten to use less dynamic language features
+\end{itemize}
+\end{frame}
+
+\begin{frame}[fragile]{Example}
+\begin{verbatim}
+function _var_exists(name) {
+    // return whether name exists in global scope
+    try {
+        eval('var foo = ' + name + ';');
+    } catch (e) {
+        return false;
+    }
+    return true;
+}
+\end{verbatim}
+\pause
+\vspace{5mm}
+Equivalent to: {\tt name in window}.
+
+Except the first way won't work if {\tt name} is {\tt name} or {\tt foo}. 
+It's also much slower.
+\end{frame}
+
+\begin{frame}{Example (2)}
+
+{\tt eval('window.' + key + ' = \{\};'); }
+
+\pause
+\vspace{5mm}
+Equivalent to: {\tt window[key] = \{\};}
+
+Except it won't work if {\tt key} is not a valid identifier. Again it's
+also much slower.
+
+\end{frame}
+
+\begin{frame}{{\tt eval} in JavaScript}
+
+{\tt eval} in JavaScript is often used for
+\begin{itemize}
+\item Dynamic code loading -- fetch a file from a server, and call
+{\tt eval} to evaluate it
+\begin{itemize}
+\item Useful since code that the user doesn't need isn't downloaded
+\item Assume this is not an issue; the goal is to make the JavaScript
+amenable to static analysis, so the user (i.e. the programmer) probably has
+access to all the code anyway
+\end{itemize}
+\item JSON parsing
+\begin{itemize}
+\item If {\tt x} is known to contain JSON data, then {\tt eval(x)} can be
+translated to {\tt JSON.parse(x)} (provided by most browsers as a safe
+alternative to {\tt eval})
+\item Prior work by the authors: an analysis that tries to
+determine which strings contain JSON data
+\begin{itemize}
+\item Can tell from constant strings, calls to {\tt JSON.stringify}
+\item In some cases (e.g. AJAX) required annotations in the code
+\end{itemize}
+\end{itemize}
+\end{itemize}
+\end{frame}
+
+\begin{frame}{Richards et al. revisited}
+\begin{itemize}
+\item Using tools made available by Richards et al., examined Alexa top
+10,000 websites
+\item 6,465 of them use {\tt eval}
+\item Filtering out sites that only use {\tt eval} in the previous two cases
+leaves 3,378
+\item Filtering out sites where all calls to {\tt eval} have constant
+arguments leaves 2,589
+\item Conclusion: "we can expect that relatively few web sites (around 25\%)
+use {\tt eval} in ways that are truly challenging to reason about with
+static analysis"
+\end{itemize}
+\end{frame}
+
+\begin{frame}{Distribution of {\tt eval} call sites}
+Looked at 17,665 static call sites, and found
+\begin{itemize}
+\item 3,339 used for loading library code
+\item 2,202 used for parsing JSON data
+\item 6,228 have constant string arguments
+\item 3,624 are performing a single operation, e.g. property read/write,
+{\tt typeof} check, function call
+\item This suggests that a technique that handles constants, JSON, and
+single operations will cover the majority of the call sites.
+\end{itemize}
+\end{frame}
+
 \section{Unevalizer}
+
+\begin{frame}{Basic approach}
+\begin{itemize}
+\item Obviously, to reliably eliminate {\tt eval}, have to precisely
+approximate the code string that is passed to it
+\item Uses a dataflow analysis to keep track of what data flows into what
+variables and functions
+\item If it detects that data is flowing into a function call $F(E)$,
+where the expression $F$ has {\tt eval} as one of its possible values,
+then a transformation component $T$ is triggered to eliminate the call
+\item $T$ either succeeds and returns a string containing equivalent
+{\tt eval}-free code for $F(E)$, or fails and returns a sentinel value
+in which we case we abort
+\item When the analysis' least fixed point is reached, all reachable
+calls to {\tt eval} have been eliminated
+\end{itemize}
+\end{frame}
+
+\begin{frame}{The transformation component}
+The analysis provides the transformation component with an 8-tuple
+$(E, V, D_G, D_L, D_M, r, p, n)$, where
+\begin{itemize}
+\item $E$ is the argument expression (in $F(E)$ from last slide)
+\item $V$ is the abstract value for $E$, a sound approximation for the
+code string to be evaluated
+\item $D_G$ and $D_L$ are sets of names in global and local scope,
+respectively
+\item $D_M$ is the set of names of built-in properties that may have been
+modified by the application code
+\item $r$ is a boolean flag indicating whether the return value of
+{\tt eval} is used or not
+\item $p$ is a boolean flag indicating whether {\tt eval} is called
+directly or through an alias
+\item $n$ is the {\tt eval} nesting depth
+\end{itemize}
+\end{frame}
+
+\begin{frame}[fragile]{Constant arguments}
+It turns out {\tt eval} is often called with constant arguments. But
+handling this is not as simple as it seems, i.e. you can't just 
+``drop the quotes'' and replace {\tt eval("S")} by {\tt S} in general.
+\vspace{5mm}
+
+For instance, {\tt eval} returns the value of the last evaluated expression,
+but can contain arbitrary statements: \vspace{3mm}
+
+{\tt x = a() * eval('b(); c();') * d();}
+\vspace{3mm}
+
+To generate syntactically correct code and still maintain the order of
+evaluation, need something like
+
+\begin{verbatim}
+var t1 = a();
+b();
+var t2 = c();
+x = t1 * t2 * d();
+\end{verbatim}
+\end{frame}
+\begin{frame}[fragile]{Other problems with dropping the quotes}
+\begin{verbatim}
+var x = 2;                var x = 2;
+function f() {            function f() {
+  var y = x;                var y = x;
+  eval('var x;');           var x;
+  return y;                 return y;
+}                         }
+\end{verbatim}
+The function on the left returns 2, but the one on the right returns
+{\tt undefined}, because variable declarations are hoisted up by the parser
+to the top of the lexical scope.
+\end{frame}
+
+\begin{frame}{An extra quirk in JavaScript}
+In JavaScript, {\tt eval} has a little extra quirk. \vspace{5mm}
+
+{\tt eval('var x = 5;'); // declares x in current scope} \vspace{5mm}
+
+{\tt var myeval = eval;} \\
+{\tt myeval('var x = 5;') // declares x in *global* scope} \vspace{5mm}
+
+{\tt eval} has different semantics depending on whether it's called
+directly or through an alias! \vspace{5mm}
+
+This is what the $p$ argument to the transformation component represents.
+The latter case should be translated to {\tt g.x = 5; }, where {\tt g} is
+a reference to the global object. How do we get {\tt g}?
+\end{frame}
+
+\begin{frame}{Aside: {\tt this} in JavaScript}
+The keyword {\tt this} in JavaScript can be confusing, because what it
+refers to depends on how the current function was called. Consider: \vspace{2mm}
+
+{\tt function getThis() \{ return this; \}}
+\vspace{2mm}
+
+\begin{enumerate}
+\item {\tt getThis();} \\
+{\tt // returns the global object (window)}
+\item {\tt (\{getThis: getThis\}).getThis();} \\
+{\tt // returns the receiver}
+\item {\tt new getThis();} \\
+{\tt // returns a new object}
+\item {\tt getThis.apply('x');} \\
+{\tt // returns the first argument }
+\end{enumerate}
+We can use the first case: \\ 
+{\tt var g = (function() \{ return this; \})()}
+\end{frame}
+             
 \section{Evaluation}
 
 \begin{frame}{References}
