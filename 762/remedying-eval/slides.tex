@@ -113,44 +113,35 @@ also much slower.
 
 \begin{frame}{{\tt eval} in JavaScript}
 
-{\tt eval} in JavaScript is often used for
+Two big uses of {\tt eval} in JavaScript are
 \begin{itemize}
-\item Dynamic code loading -- fetch a file from a server, and call
-{\tt eval} to evaluate it
+\item Dynamic code loading. ``Importing'' code can be done by
+fetching it from a server and evaluating it.
 \begin{itemize}
 \item Useful since code that the user doesn't need isn't downloaded
-\item Assume this is not an issue; the goal is to make the JavaScript
-amenable to static analysis, so the user (i.e. the programmer) probably has
-access to all the code anyway
+\item This is fine; the goal is to make the JavaScript
+amenable to static analysis, not to eliminate {\tt eval} just because. 
+We can assume we have access to all the code.
 \end{itemize}
 \item JSON parsing
 \begin{itemize}
-\item If {\tt x} is known to contain JSON data, then {\tt eval(x)} can be
-translated to {\tt JSON.parse(x)} (provided by most browsers as a safe
-alternative to {\tt eval})
-\item Prior work by the authors: an analysis that tries to
-determine which strings contain JSON data
-\begin{itemize}
-\item Can tell from constant strings, calls to {\tt JSON.stringify}
-\item In some cases (e.g. AJAX) required annotations in the code
-\end{itemize}
+\item Authors published a prior paper on using string analysis to try
+and determine which strings contained JSON data.
 \end{itemize}
 \end{itemize}
 \end{frame}
 
 \begin{frame}{Richards et al. revisited}
+Using tools made available by Richards et al., authors examined Alexa top
+10,000 websites and found that
 \begin{itemize}
-\item Using tools made available by Richards et al., examined Alexa top
-10,000 websites
-\item 6,465 of them use {\tt eval}
-\item Filtering out sites that only use {\tt eval} in the previous two cases
-leaves 3,378
-\item Filtering out sites where all calls to {\tt eval} have constant
-arguments leaves 2,589
-\item Conclusion: "we can expect that relatively few web sites (around 25\%)
-use {\tt eval} in ways that are truly challenging to reason about with
-static analysis"
+\item 6,465 of them use {\tt eval}.
+\item 3,378 use it for purposes other than the previous two cases.
+\item 2,589 call it with non-constant arguments.
 \end{itemize}
+Their conclusion: "Although {\tt eval} is pervasive, we can expect that
+relatively few web sites (around 25\%) use {\tt eval} in ways that are
+truly challenging to reason about with static analysis."
 \end{frame}
 
 \begin{frame}{Distribution of {\tt eval} call sites}
@@ -169,20 +160,21 @@ single operations will cover the majority of the call sites.
 \section{Unevalizer}
 
 \begin{frame}{Basic approach}
-\begin{itemize}
-\item Obviously, to reliably eliminate {\tt eval}, have to precisely
-approximate the code string that is passed to it
-\item Uses a dataflow analysis to keep track of what data flows into what
-variables and functions
-\item If it detects that data is flowing into a function call $F(E)$,
-where the expression $F$ has {\tt eval} as one of its possible values,
-then a transformation component $T$ is triggered to eliminate the call
-\item $T$ either succeeds and returns a string containing equivalent
+Obviously, to reliably eliminate {\tt eval}, we have to precisely
+approximate the code string that is passed to it. \vspace{5mm}
+
+The basic idea is to use dataflow analysis to keep track of what data
+flows into what variables and functions; if we detect that data is flowing
+into a function call $F(E)$, where the expression $F$ has {\tt eval} as
+one of its possible values, then a transformation component $T$ is
+triggered to eliminate the call. \vspace{5mm}
+
+$T$ either succeeds and returns a string containing equivalent
 {\tt eval}-free code for $F(E)$, or fails and returns a sentinel value
-in which we case we abort
-\item When the analysis' least fixed point is reached, all reachable
-calls to {\tt eval} have been eliminated
-\end{itemize}
+in which we case we abort. \vspace{5mm}
+
+When the analysis' least fixed point is reached, all reachable
+calls to {\tt eval} have been eliminated.
 \end{frame}
 
 \begin{frame}{The transformation component}
@@ -253,7 +245,7 @@ directly or through an alias! \vspace{5mm}
 
 This is what the $p$ argument to the transformation component represents.
 The latter case should be translated to {\tt g.x = 5; }, where {\tt g} is
-a reference to the global object. How do we get {\tt g}?
+a reference to the global object.
 \end{frame}
 
 \begin{frame}{Aside: {\tt this} in JavaScript}
@@ -270,14 +262,121 @@ refers to depends on how the current function was called. Consider: \vspace{2mm}
 {\tt // returns the receiver}
 \item {\tt new getThis();} \\
 {\tt // returns a new object}
-\item {\tt getThis.apply('x');} \\
+\item {\tt getThis.apply('x');} or {\tt getThis.call('x')} \\
 {\tt // returns the first argument }
 \end{enumerate}
-We can use the first case: \\ 
-{\tt var g = (function() \{ return this; \})()}
+\end{frame}
+
+\begin{frame}{Getting at the global object}
+The first case helps lets us get a reference to the global object: \\ 
+{\tt var g = (function() \{ return this; \})()}  \vspace{5mm}
+
+Then we can transform {\tt myeval('x = 5;')} to {\tt g.x = 5}. \vspace{5mm}
+
+This works for property writes, but not reads; accessing a nonexistent
+variable throws a {\tt ReferenceError}, but reading a nonexistent
+property just yields {\tt undefined}. Then a sound replacement for
+{\tt myeval('x')} is not {\tt g.x} but \vspace{5mm}
+
+{\tt ('x' in g ? g.x : throw new ReferenceError())}
+\end{frame}
+
+\begin{frame}{Other edge cases}
+\begin{itemize}
+\item It's possible the code string passed to {\tt eval} is not valid
+JavaScript.  In that case, we can replace the call to {\tt eval} with
+{\tt throw new SyntaxError()}.
+\item Even if we know the entire string we can't necessarily know the
+return value, e.g. {\tt eval('2; if (b) 3;')}. Unevalizer doesn't handle
+this. If the return value is needed (the $r$ flag) and it's ambiguous what
+it is, it aborts.
+\end{itemize}
+\end{frame}
+
+\begin{frame}[fragile]{Handling non constant strings: constant propagation}
+Beyond constant strings, obviously the first thing to try is constant
+propagation. Even just modeling string concatenation goes a long way,
+as in examples like
+
+\begin{verbatim}
+var json = '<large constant string>';
+...
+eval('area=' + json);
+\end{verbatim}
+\end{frame}
+
+\begin{frame}{Handling non constant strings: JSON}
+A common pattern is {\tt eval('(' + v + ')')} where {\tt v} contains JSON
+data; this forces $v$ to be evaluated as an expression. \vspace{5mm}
+
+Most modern browsers provide the {\tt JSON.parse} function as a safe
+alternative to {\tt eval} for parsing JSON. We can translate the above
+to {\tt JSON.parse(v)} if we can determine {\tt v} contains JSON.
+\vspace{5mm}
+
+This was the subject of prior work by the authors. Can identify JSON in
+constant strings, and from calls to {\tt JSON.stringify}, and in some
+cases rely on user annotations (for e.g. Ajax calls), and propagate that
+information along the dataflow analysis.
+\end{frame}
+
+\begin{frame}{Handling non constant strings: tracking valid identifiers}
+Property reads ({\tt eval('foo.' + x)}) can be
+transformed into {\tt foo[x]}, but only if {\tt x} contains a valid
+identifier. Can treat this similarly as the previous case, by tracking
+which strings contain valid identifiers and propagating that information.
+
+\vspace{5mm}
+
+This also works for things like {\tt eval('foo\_' + x)} or otherwise
+dynamically constructing identifier names; we can track which strings
+contain partial identifiers (same rules as for identifiers but can e.g.
+start with a number).
+\end{frame}
+
+\begin{frame}[fragile]{Handling non constant strings: specialization}
+Consider the following ({\tt /x/} denotes a regex literal):
+\vspace{5mm}
+\begin{verbatim}
+has_cookie = function(name) {
+    var ca = document.cookie.split(';');
+    for (var i = 0; i < ca.length; i++) {
+        if (eval('ca[i].match(/\\b' + name + '=/)'))
+            return true;
+    }
+    return false;
+}
+\end{verbatim}
+where {\tt has\_cookie} is later called with constant cookie names,
+e.g. {\tt has\_cookie('\_jsuid')}, {\tt has\_cookie('notrack')} etc. We
+can gather up all the possible values for {\tt name} and have the
+the conditional dispatch on them.
 \end{frame}
              
 \section{Evaluation}
+
+\begin{frame}{Implementation}
+\begin{itemize}
+\item The transformation component was implemented against TAJS, an existing
+dataflow analyzer for JavaScript.
+\item The transformation component works by taking the abstract value $V$,
+adding placeholders to turn it into a valid JavaScript program, parsing it,
+and applying the transformation on the resulting AST, then pretty-printing
+it and returning that.
+\end{itemize}
+\end{frame}
+
+\begin{frame}{Research questions}
+\begin{enumerate}
+\item Is the Unevalizer able to transform common usage patterns of
+{\tt eval} calls?
+\item To what extent are the individual techniques presented (constant
+propagation, tracking valid identifiers, specialization) useful in practice?
+\item For call sites where the Unevalizer fails to find a valid
+transformation, can we suggest improvements that are likely to handle
+more cases?
+\end{enumerate}
+\end{frame}
 
 \begin{frame}{References}
 \bibliographystyle{plain}
