@@ -5,6 +5,7 @@
 \usepackage{amssymb}
 \usepackage{tikz}
 \usepackage{graphicx}
+\usetheme{Boadilla}
 \title[Remedying the eval that men do]
 {Remedying the eval that men do}
 \date{November 28, 2012}
@@ -295,8 +296,7 @@ it is, it aborts.
 
 \begin{frame}[fragile]{Handling non constant strings: constant propagation}
 Beyond constant strings, obviously the first thing to try is constant
-propagation. Even just modeling string concatenation goes a long way,
-as in examples like
+propagation. 
 
 \begin{verbatim}
 var json = '<large constant string>';
@@ -366,6 +366,28 @@ it and returning that.
 \end{itemize}
 \end{frame}
 
+\begin{frame}{Benchmarks}
+\begin{itemize}
+\item Selected benchmarks from the Alexa top 500 list
+\item Focused on the challenging cases; excluded web sites that e.g.
+only use {\tt eval} to load libraries, or only parse JSON as that has
+already been covered in prior work
+\item Left with 19 web sites
+\end{itemize}
+\end{frame}
+
+\begin{frame}{Slicing}
+The 19 benchmarks selected are quite large, and TAJS, the dataflow analysis
+framework used, is not able to analyze them. \vspace{5mm}
+
+To evaluate the Unevalizer, 25 interesting program slices (calls to
+{\tt eval} and the relevant dataflow) were manually extracted from the
+benchmarks. \vspace{5mm} 
+
+Also added three interesting Chrome Experiments that use {\tt eval} in
+interesting ways, resulting in 28 benchmarks.
+\end{frame}  
+
 \begin{frame}{Research questions}
 \begin{enumerate}
 \item Is the Unevalizer able to transform common usage patterns of
@@ -376,6 +398,83 @@ propagation, tracking valid identifiers, specialization) useful in practice?
 transformation, can we suggest improvements that are likely to handle
 more cases?
 \end{enumerate}
+\end{frame}
+
+\begin{frame}{Results}
+\begin{columns}[l]
+\column{1.5in}
+\includegraphics[scale=0.25]{results.png}
+\column{3in}
+\begin{itemize}
+\item Pass: whether Unevalizer was able to eliminate all calls to
+{\tt eval} in this benchmark (19/28, or 33/44 call sites)
+\item ConstProp/Identifier/Specialization: how many call sites are handled
+by each technique
+\end{itemize}
+\end{columns}
+\end{frame}
+
+\begin{frame}[fragile]{Example successful transformation}
+\begin{verbatim}
+function _SoAD_exec(o) {
+  if (eval("typeof(" + o.t + "_main)") == "function")
+    eval(o.t + "_main(o)");
+}
+function _SoAD_exec(o) {
+  if (typeof(
+        (o.t + "_main") in global ?
+            global[o.t + "_main"] :
+            throw new ReferenceError())
+      == "function")
+     ((o.t + "_main") in global ?
+          global[o.t + "_main"] :
+            throw new ReferenceError())(o);
+}
+\end{verbatim}
+Safe because the dataflow analysis determines {\tt o.t} always contains
+a valid identifier.
+\end{frame}
+
+\begin{frame}[fragile]{Cause for failure: insufficient precision}
+\begin{verbatim}
+for (var libName in $iTXT.js.loader) {
+  eval(libName + '_Load()');
+}
+\end{verbatim}
+\vspace{5mm}
+{\tt \$iTXT.js.loader} keys refer to modules; some of them contain dots, 
+so aren't valid identifiers, so the call site can't be transformed.
+
+\vspace{5mm}
+Could apply loop unrolling, enabling many of the calls to be transformed.
+\end{frame}
+
+\begin{frame}[fragile]{Cause for failure: string concatenation}
+The analysis has special treatment of string concatenations as arguments
+to functions. In this example:
+
+\begin{verbatim}
+function showIvyViaJs(locationId) {
+  ...
+  var _fconv = "ivymap[\'" + locationId + "\'";
+  try {
+    _f = eval(_fconv);
+    ...
+  } catch (e) {}
+}
+\end{verbatim}
+\vspace{5mm}
+The analysis doesn't determine that {\tt \_fconv} could be specialized on.
+Could improve constant propagation to propagate entire expressions.
+\end{frame}
+
+\begin{frame}{Conclusion}
+"The {\tt eval} function is in practice not as evil as some men claim."
+\vspace{5mm}
+Unevalizer succeeds in eliminating typical uses of {\tt eval}, but
+possible improvements are many; future work includes better handling of
+{\tt eval} in loops, extending constant propagation, and generally improving
+the precision of the string analysis.
 \end{frame}
 
 \begin{frame}{References}
